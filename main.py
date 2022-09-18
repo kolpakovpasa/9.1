@@ -1,4 +1,5 @@
 import requests
+import json
 from pprint import pprint
 
 
@@ -19,23 +20,22 @@ class VkApiClient:
 
     def get_photos(self, owner_id):
         url = 'https://api.vk.com/method/photos.get'
-        photo_links = []
         params = {
             'owner_id': owner_id,
             'album_id': 'profile',
             'extended': '1',
+            'photo_sizes': '1',
             'access_token': self.vktoken,
             'v': self.api_version
             }
         response = requests.get(url, params=params)
-        #pprint(response.json())
         if not response.ok:
             print(f'Ошибка! Статус ответа: {response.status_code}')
             return False
         if not response.json().get('response').get('items'):
             print(f'Ошибка! У этого пользователя нет фотографий профиля!')
             return False
-
+        pprint(response.json())
         photos_downloaded = []
         for item in response.json().get('response').get('items'):
             picture = requests.get(item.get('sizes')[-1].get('url'))
@@ -47,15 +47,19 @@ class VkApiClient:
                 file.write(picture.content)
             photo_info = {
                 "file_name": f"{name}.jpg",
-                "size": f"{item.get('sizes')[-1].get('type')}"
+                "size": item.get('sizes')[-1].get('type'),
             }
             photos_downloaded.append(photo_info)
-        pprint(photos_downloaded)
+
+        json_data = json.dumps(photos_downloaded, indent=4)
+        with open('data.json', 'w') as file:
+            file.write(json_data)
+
+        return photos_downloaded
 
 
-class YaUploader:
-    files_url = 'https://cloud-api.yandex.net/v1/disk/resources/files'
-    upload_url = 'https://cloud-api.yandex.net/v1/disk/resources/upload'
+class YaClient:
+    base_url = 'https://cloud-api.yandex.net/v1/disk/'
 
     def __init__(self, yatoken):
         self.yatoken = yatoken
@@ -67,16 +71,17 @@ class YaUploader:
     def get_headers(self):
         return {
             'Content-Type': 'application/json',
-            'Authorization': f'OAuth {self.yatoken}'
+            'Authorization': f'OAuth {self.yatoken}',
+            'Accept': 'application/json'
         }
 
     def get_upload_link(self, file_path):
         params = {'path': file_path, 'overwrite': 'true'}
-        response = requests.get(self.upload_url, params=params, headers=self.header)
+        response = requests.get(f'{self.base_url}resources/upload', params=params, headers=self.header)
         return response.json()
 
     def upload(self, file_path):
-        href = self.get_upload_link(file_path).get('href')
+        href = self.get_upload_link(f'photos/{file_path}').get('href')
         if not href:
             print('Не удалось получить ссылку для загрузки')
             return
@@ -89,14 +94,32 @@ class YaUploader:
                 print(f'Ошибка, файл не загружен. Код ответа - {response.status_code}')
                 return False
 
+    def create_folder(self, folder_title):
+        params = {'path': folder_title}
+        response = requests.put(f'{self.base_url}resources', params=params, headers=self.header)
+        if response.status_code == 201:
+            print('Папка создана')
+        elif response.status_code == 409:
+            print('Ошибка! Папка с таким именем уже есть')
+        else:
+            print(f'Ошибка! Не удалось создать папку. Код ответа {response.status_code}')
 
-user_id = input('Введите ID пользователя ВКонтакте: ')
-vk_client = VkApiClient(vktoken=get_vk_token(), api_version="5.131")
-result = vk_client.get_photos(user_id)
+
+def main():
+    user_id = input('Введите ID пользователя ВКонтакте: ')
+    vk_client = VkApiClient(vktoken=get_vk_token(), api_version="5.131")
+    result = vk_client.get_photos(user_id)
+    pprint(result)
+    ya_token = input('Введите токен для Яндекс Диска: ')
+    downloader = YaClient(yatoken=ya_token)
+    downloader.create_folder('photos')
+    for picture in result:
+        downloader.upload(picture.get('file_name'))
 
 
-# # path_to_file = input('Введите путь к файлу: ')
-# uploader = YaUploader(yatoken=input('Введите токен для Яндекс Диска: '))
-# # result = uploader.upload(path_to_file)
+if __name__ == '__main__':
+    main()
+
+
 
 
